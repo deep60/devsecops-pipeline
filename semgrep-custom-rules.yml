@@ -1,0 +1,27 @@
+# semgrep-custom-rules.yml
+rules:
+  - id: sql-injection-fstring
+    patterns:
+      - pattern: |
+          $CURSOR.execute(f"...{$VAR}...")
+      - pattern: |
+          $CURSOR.execute("..." + $VAR + "...")
+    message: |
+      SQL injection: user input '$VAR' is directly interpolated into a SQL query.
+      Use parameterized queries: cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      owasp: "A03:2021 - Injection"
+
+  - id: hardcoded-secret-key
+    pattern: |
+      $KEY = "..."
+    metavariable-regex:
+      metavariable: $KEY
+      regex: (SECRET|PASSWORD|API_KEY|TOKEN|AWS_SECRET)
+    message: |
+      Hardcoded secret found in '$KEY'. Move this to environment variables.
+    languages: [python]
+    severity: WARNING
