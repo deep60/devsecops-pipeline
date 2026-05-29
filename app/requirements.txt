@@ -1,0 +1,5 @@
+# app/requirements.txt
+flask==0.12.2        # Known CVEs — Trivy dependency scan will flag this
+requests==2.18.0     # Known CVEs
+PyYAML==3.12         # Known CVEs — deserialization vulnerability
+cryptography==2.1.4  # Outdated crypto library
