@@ -3,11 +3,10 @@ import sqlite3
 import os
 
 SECRET_KEY = ""
-# Fake secrets that match real token patterns — TruffleHog WILL catch these
-GITHUB_TOKEN = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890ab"   # GitHub PAT format
-STRIPE_KEY   = "sk_live_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890"  # Stripe secret key format
-SLACK_TOKEN  = "xoxb-123456789012-123456789012-aBcDeFgHiJkLmNoPqRsTuV"  # Slack bot token
 AWS_SECRET = "AKIAIOSFODNN7EXAMPLE"
+GITHUB_TOKEN = "ghp_FAKE_TOKEN_FOR_DEMO_NOT_REAL_1234"
+STRIPE_KEY   = "sk_test_DEMO_ONLY_NOT_A_REAL_KEY_xyz"
+SLACK_TOKEN  = "xoxb-DEMO-000000000000-FAKETOKEN"
 
 def get_user(username):
     conn = sqlite3.connect("user.db")
