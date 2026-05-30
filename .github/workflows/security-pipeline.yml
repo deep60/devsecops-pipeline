@@ -28,3 +28,31 @@ jobs:
 
       - name: Run Semgrep SAST scan
         run: semgrep ci
+
+
+
+# ── PHASE 3: Secrets Detection with TruffleHog ──────────────────────
+  secrets-detection:
+    name: Secrets — TruffleHog
+    runs-on: ubuntu-latest
+    needs: sast-semgrep
+
+    steps:
+      - name: Checkout full git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # must fetch ALL commits
+
+      - name: Run TruffleHog scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          extra_args: --no-verification --json
+
+      - name: Upload TruffleHog results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trufflehog-results
+          path: trufflehog-results.json
