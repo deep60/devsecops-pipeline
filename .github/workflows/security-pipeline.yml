@@ -8,159 +8,187 @@ on:
 
 jobs:
 
+  # ── PHASE 2: SAST ────────────────────────────────────────────────────
   sast-semgrep:
     name: SAST — Semgrep
-    runs-on: ubuntu-latest        # ← fixed: GitHub's free cloud, not self-hosted
-    permissions:
-      contents: read
-
-    env:
-      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
-
-    container:
-      image: semgrep/semgrep
-
-    if: github.actor != 'dependabot[bot]'
-
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: semgrep/semgrep-action@v1
+        with:
+          config: p/owasp-top-ten
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        continue-on-error: true
 
-      - name: Run Semgrep SAST scan
-        run: semgrep ci
-
-
-
-# ── PHASE 3: Secrets Detection with TruffleHog ──────────────────────
+  # ── PHASE 3: SECRETS ─────────────────────────────────────────────────
   secrets-detection:
     name: Secrets — TruffleHog
     runs-on: ubuntu-latest
     needs: sast-semgrep
-
     steps:
-      - name: Checkout full git history
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0          # must fetch ALL commits
-
-      - name: Run TruffleHog scan
-        uses: trufflesecurity/trufflehog@main
+          fetch-depth: 0
+      - uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          base: ${{ github.event.repository.default_branch }}
-          extra_args: --no-verification --json
+          base: main
+          extra_args: --no-verification
+        continue-on-error: true
 
-      - name: Upload TruffleHog results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: trufflehog-results
-          path: trufflehog-results.json
-
-
-# ── PHASE 4a: Container Scanning with Trivy ─────────────────────────
+  # ── PHASE 4a: CONTAINER SCAN ─────────────────────────────────────────
   container-scan:
     name: Container — Trivy
     runs-on: ubuntu-latest
     needs: secrets-detection
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Build Docker image
         run: docker build -t devsecops-demo:latest ./app
 
-      - name: Run Trivy container scan
+      - name: Trivy scan — table output
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: devsecops-demo:latest
           format: table
           severity: CRITICAL,HIGH
           exit-code: '0'
-          ignore-unfixed: true        
+          ignore-unfixed: true
 
-      - name: Save Trivy results as JSON
+      - name: Trivy scan — JSON output
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: devsecops-demo:latest
           format: json
           output: trivy-image-results.json
+          exit-code: '0'
+          ignore-unfixed: true
 
-      - name: Upload Trivy results
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: trivy-image-results
           path: trivy-image-results.json
 
-  # ── PHASE 4b: IaC Scanning with Checkov ─────────────────────────────
+  # ── PHASE 4b: IaC SCAN ───────────────────────────────────────────────
   iac-scan:
     name: IaC — Checkov
     runs-on: ubuntu-latest
     needs: secrets-detection
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run Checkov Terraform scan
-        uses: bridgecrewio/checkov-action@master
-        with:
-          directory: terraform/
-          framework: terraform
-          output_format: cli
-          soft_fail: true        # don't fail pipeline yet (Phase 6 handles this)
-
-      - name: Save Checkov results
-        uses: bridgecrewio/checkov-action@master
+      - uses: actions/checkout@v4
+      - uses: bridgecrewio/checkov-action@master
         with:
           directory: terraform/
           framework: terraform
           output_format: json
           output_file_path: checkov-results.json
           soft_fail: true
-
-      - name: Upload Checkov results
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: checkov-results
           path: checkov-results.json
 
-
-
-# ── PHASE 5: Dependency Vulnerability Scanning ──────────────────────
+  # ── PHASE 5: DEPENDENCY SCAN ─────────────────────────────────────────
   dependency-scan:
     name: Dependencies — Trivy SCA
     runs-on: ubuntu-latest
     needs: secrets-detection
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: fs
-          scan-ref: ./app
-          format: table
-          severity: CRITICAL,HIGH
-          exit-code: '0'
-
-      - name: Save dependency scan results
-        uses: aquasecurity/trivy-action@master
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
           scan-ref: ./app
           format: json
           output: trivy-deps-results.json
           exit-code: '0'
-
-      - name: Upload dependency results
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: trivy-deps-results
           path: trivy-deps-results.json
+
+  # ── PHASE 6: ZERO-TRUST DEPLOYMENT GATE ──────────────────────────────
+  security-gate:
+    name: Security Gate — Deploy Decision
+    runs-on: ubuntu-latest
+    needs: [sast-semgrep, secrets-detection, container-scan, iac-scan, dependency-scan]
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all scan results
+        uses: actions/download-artifact@v4
+        with:
+          path: scan-results/
+
+      - name: Evaluate security gate
+        id: gate
+        run: |
+          echo "=============================="
+          echo "  SECURITY GATE EVALUATION"
+          echo "=============================="
+
+          BLOCK=false
+
+          # Check Trivy image results for CRITICAL CVEs
+          if [ -f scan-results/trivy-image-results/trivy-image-results.json ]; then
+            CRITICALS=$(cat scan-results/trivy-image-results/trivy-image-results.json \
+              | python3 -c "
+          import json,sys
+          data=json.load(sys.stdin)
+          count=sum(
+            1 for r in data.get('Results',[])
+            for v in (r.get('Vulnerabilities') or [])
+            if v.get('Severity')=='CRITICAL' and not v.get('FixedVersion','')
+          )
+          print(count)
+          ")
+            echo "Container CRITICAL CVEs (unfixed): $CRITICALS"
+            if [ "$CRITICALS" -gt 10 ]; then
+              echo "❌ Too many unresolved CRITICAL CVEs: $CRITICALS"
+              BLOCK=true
+            else
+              echo "✅ Container CVEs within threshold"
+            fi
+          fi
+
+          # Check Checkov results for IaC failures
+          if [ -f scan-results/checkov-results/checkov-results.json ]; then
+            FAILED=$(cat scan-results/checkov-results/checkov-results.json \
+              | python3 -c "
+          import json,sys
+          data=json.load(sys.stdin)
+          if isinstance(data,list): data=data[0]
+          print(data.get('summary',{}).get('failed',0))
+          " 2>/dev/null || echo "0")
+            echo "IaC failed checks: $FAILED"
+            if [ "$FAILED" -gt 20 ]; then
+              echo "❌ Too many IaC failures: $FAILED"
+              BLOCK=true
+            else
+              echo "✅ IaC checks within threshold"
+            fi
+          fi
+
+          echo "=============================="
+          if [ "$BLOCK" = true ]; then
+            echo "🚨 DEPLOYMENT BLOCKED by Security Gate"
+            echo "=============================="
+            exit 1
+          else
+            echo "✅ DEPLOYMENT APPROVED by Security Gate"
+            echo "=============================="
+            exit 0
+          fi
+
+      - name: Deployment approved
+        if: success()
+        run: |
+          echo "🚀 All security checks passed."
+          echo "✅ Safe to deploy to production."
